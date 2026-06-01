@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../services/sensor_service.dart';
-import '../services/api_service.dart';
+import '../services/raycast_service.dart';
 import '../models/sighting_result.dart';
 import 'result_sheet.dart';
 
@@ -18,7 +18,7 @@ class ViewfinderScreen extends StatefulWidget {
 class _ViewfinderScreenState extends State<ViewfinderScreen> {
   CameraController? _cam;
   final SensorService _sensors = SensorService();
-  final ApiService _api = ApiService();
+  final RaycastService _raycast = RaycastService();
   bool _locking = false;
   String _status = '';
   bool _showOffsetSlider = false;
@@ -77,7 +77,7 @@ class _ViewfinderScreenState extends State<ViewfinderScreen> {
     });
 
     try {
-      final result = await _api.raycast(
+      final result = await _raycast.raycast(
         vector,
         onProgress: (msg) {
           if (mounted) setState(() => _status = msg);
