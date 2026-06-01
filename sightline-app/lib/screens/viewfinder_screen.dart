@@ -147,6 +147,21 @@ class _ViewfinderScreenState extends State<ViewfinderScreen> {
                       final acc = _sensors.position?.accuracy
                               .toStringAsFixed(0) ??
                           '--';
+
+                      // Compass accuracy: lower = better
+                      // FlutterCompass accuracy is in degrees of error
+                      final compassAcc = _sensors.compassAccuracy;
+                      Color compassColor;
+                      if (compassAcc < 0) {
+                        compassColor = Colors.grey; // Unknown
+                      } else if (compassAcc <= 15) {
+                        compassColor = Colors.green; // Good
+                      } else if (compassAcc <= 30) {
+                        compassColor = Colors.amber; // Fair
+                      } else {
+                        compassColor = Colors.red; // Poor — recalibrate
+                      }
+
                       return Container(
                         margin: const EdgeInsets.all(12),
                         padding: const EdgeInsets.symmetric(
@@ -169,7 +184,44 @@ class _ViewfinderScreenState extends State<ViewfinderScreen> {
                               height: 24,
                               color: Colors.white12,
                             ),
-                            _telemetryItem('HDG', '$az°'),
+                            // Heading with accuracy dot
+                            Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      'HDG',
+                                      style: TextStyle(
+                                        color: Colors.white.withValues(alpha: 0.35),
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w600,
+                                        letterSpacing: 1,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Container(
+                                      width: 6,
+                                      height: 6,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: compassColor,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  '$az°',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
                             Container(
                               width: 1,
                               height: 24,

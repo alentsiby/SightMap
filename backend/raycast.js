@@ -1,11 +1,12 @@
 const geomagnetism = require('geomagnetism');
 const { getElevationsBatch, sleep } = require('./dem');
-const { getPeakNearby } = require('./overpass');
+const { getPlaceNearby } = require('./overpass');
 const { getWikiSummary } = require('./wiki');
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 const STEP_METRES = 25;         // Resolution: one sample every 25 metres
 const MAX_STEPS = 3200;         // 80 km max range (3200 × 25m)
+const MIN_DIST_METRES = 200;    // Ignore hits closer than this (flat terrain noise)
 const EARTH_RADIUS = 6371000;   // Mean Earth radius in metres
 const DEG = Math.PI / 180;      // Degrees → radians multiplier
 
@@ -72,6 +73,7 @@ function refractionCorrection(pitchDeg) {
  * 4. Pre-compute ALL ray step positions (pure math, instant)
  * 5. Batch-fetch terrain elevations from API (chunked, 100 per call)
  * 6. Walk the ray: first point where rayAlt ≤ terrainElevation = HIT
+ *    (skipping first MIN_DIST_METRES to avoid flat-terrain noise)
  * 7. Enrich hit with OSM peak name + Wikipedia description
  *
  * @param {{lat: number, lng: number, alt: number, azimuth: number, pitch: number}} input
@@ -82,7 +84,7 @@ async function raycast({ lat, lng, alt, azimuth, pitch }) {
 
   // 1. Correct azimuth for magnetic declination
   const trueAzimuth = applyDeclination(azimuth, lat, lng);
-  console.log(`[raycast] Magnetic azimuth ${azimuth}° → True azimuth ${trueAzimuth.toFixed(2)}°`);
+  console.log(`[raycast] Magnetic azimuth ${azimuth.toFixed(1)}° → True azimuth ${trueAzimuth.toFixed(2)}°`);
 
   // 2. Apply atmospheric refraction to pitch
   const correctedPitch = pitch - refractionCorrection(pitch);
@@ -95,7 +97,8 @@ async function raycast({ lat, lng, alt, azimuth, pitch }) {
     Math.floor((horizonKm * 1000) / STEP_METRES),
     MAX_STEPS
   );
-  console.log(`[raycast] Horizon: ${horizonKm.toFixed(1)} km, max steps: ${maxSteps}`);
+  const minStep = Math.ceil(MIN_DIST_METRES / STEP_METRES);
+  console.log(`[raycast] Horizon: ${horizonKm.toFixed(1)} km, max steps: ${maxSteps}, skip first ${minStep} steps (${MIN_DIST_METRES}m)`);
 
   // 4. Pre-compute ALL ray positions in one pass (pure math, instant)
   const points = [];
@@ -140,10 +143,14 @@ async function raycast({ lat, lng, alt, azimuth, pitch }) {
     console.log(`[raycast] Chunk ${chunkIdx + 1}/${totalChunks}: got ${elevs.filter(e => e != null).length}/${chunk.length} elevations`);
 
     // 6. Check this chunk for intersection (early exit)
+    //    Skip hits within MIN_DIST_METRES to avoid flat-terrain false positives
     for (let j = 0; j < chunk.length; j++) {
       const globalIdx = start + j;
       const elev = elevs[j];
       if (elev == null) continue;
+
+      // Skip near-range hits (flat terrain noise)
+      if (globalIdx + 1 < minStep) continue;
 
       if (points[globalIdx].rayAlt <= elev) {
         const hitLat = points[globalIdx].lat;
@@ -152,8 +159,8 @@ async function raycast({ lat, lng, alt, azimuth, pitch }) {
 
         console.log(`[raycast] HIT at step ${globalIdx + 1}: lat=${hitLat.toFixed(5)}, lng=${hitLng.toFixed(5)}, dist=${distKm} km, terrain=${elev}m, ray=${points[globalIdx].rayAlt.toFixed(1)}m`);
 
-        // 7. Enrich with OSM peak name and Wikipedia description
-        const peak = await getPeakNearby(hitLat, hitLng);
+        // 7. Enrich with OSM peak/place name and Wikipedia description
+        const peak = await getPlaceNearby(hitLat, hitLng);
         const wiki = peak ? await getWikiSummary(peak.name) : null;
 
         return {
@@ -162,6 +169,7 @@ async function raycast({ lat, lng, alt, azimuth, pitch }) {
           lng: hitLng,
           elevation: elev,
           distance_km: distKm,
+          true_azimuth: Math.round(trueAzimuth * 10) / 10,
           peak,
           wiki,
         };
@@ -171,7 +179,8 @@ async function raycast({ lat, lng, alt, azimuth, pitch }) {
 
   // Ray never hit terrain — user is aiming too high
   console.log('[raycast] No intersection found — ray missed all terrain');
-  return { hit: false, reason: 'aim_lower' };
+  return { hit: false, reason: 'aim_lower', true_azimuth: Math.round(trueAzimuth * 10) / 10 };
 }
 
 module.exports = { raycast };
+

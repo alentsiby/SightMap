@@ -13,11 +13,9 @@ class ResultSheet extends StatelessWidget {
 
   Future<void> _navigate() async {
     final uri = Uri.parse(
-      'google.navigation:q=${result.lat},${result.lng}',
+      'https://www.google.com/maps/dir/?api=1&destination=${result.lat},${result.lng}',
     );
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri);
-    }
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
   Future<void> _share() async {
