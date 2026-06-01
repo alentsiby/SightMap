@@ -80,8 +80,9 @@ app.get('/health', (_, res) => {
 });
 
 // ─── Start Server ────────────────────────────────────────────────────────────
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`\n🏔️  SightLine backend running on port ${PORT}`);
   console.log(`   Health: http://localhost:${PORT}/health`);
-  console.log(`   Raycast: POST http://localhost:${PORT}/raycast\n`);
+  console.log(`   Raycast: POST http://localhost:${PORT}/raycast`);
+  console.log(`   Listening on all interfaces (0.0.0.0)\n`);
 });

@@ -1,5 +1,5 @@
 const geomagnetism = require('geomagnetism');
-const { getElevationsBatch } = require('./dem');
+const { getElevationsBatch, sleep } = require('./dem');
 const { getPeakNearby } = require('./overpass');
 const { getWikiSummary } = require('./wiki');
 
@@ -121,41 +121,51 @@ async function raycast({ lat, lng, alt, azimuth, pitch }) {
   }
 
   // 5. Batch fetch elevations in chunks of 100 (API limit)
+  //    Check for hits after each chunk (early exit = fewer API calls)
+  //    Delay 1.1s between chunks to respect OpenTopoData rate limit (~1 req/sec)
   const CHUNK = 100;
-  const allElevations = [];
-  console.log(`[raycast] Fetching elevations for ${points.length} points in ${Math.ceil(points.length / CHUNK)} chunks...`);
+  const totalChunks = Math.ceil(points.length / CHUNK);
+  console.log(`[raycast] Fetching elevations for ${points.length} points in ${totalChunks} chunks...`);
 
-  for (let i = 0; i < points.length; i += CHUNK) {
-    const chunk = points.slice(i, i + CHUNK);
+  for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
+    const start = chunkIdx * CHUNK;
+    const chunk = points.slice(start, start + CHUNK);
+
+    // Rate-limit: wait between chunks (skip delay before first)
+    if (chunkIdx > 0) {
+      await sleep(1100);
+    }
+
     const elevs = await getElevationsBatch(chunk);
-    allElevations.push(...elevs);
-  }
+    console.log(`[raycast] Chunk ${chunkIdx + 1}/${totalChunks}: got ${elevs.filter(e => e != null).length}/${chunk.length} elevations`);
 
-  // 6. Find first intersection (ray goes underground = hit)
-  for (let i = 0; i < points.length; i++) {
-    const elev = allElevations[i];
-    if (elev == null) continue; // skip if elevation data unavailable
+    // 6. Check this chunk for intersection (early exit)
+    for (let j = 0; j < chunk.length; j++) {
+      const globalIdx = start + j;
+      const elev = elevs[j];
+      if (elev == null) continue;
 
-    if (points[i].rayAlt <= elev) {
-      const hitLat = points[i].lat;
-      const hitLng = points[i].lng;
-      const distKm = ((i + 1) * STEP_METRES / 1000).toFixed(2);
+      if (points[globalIdx].rayAlt <= elev) {
+        const hitLat = points[globalIdx].lat;
+        const hitLng = points[globalIdx].lng;
+        const distKm = ((globalIdx + 1) * STEP_METRES / 1000).toFixed(2);
 
-      console.log(`[raycast] HIT at step ${i + 1}: lat=${hitLat.toFixed(5)}, lng=${hitLng.toFixed(5)}, dist=${distKm} km, terrain=${elev}m, ray=${points[i].rayAlt.toFixed(1)}m`);
+        console.log(`[raycast] HIT at step ${globalIdx + 1}: lat=${hitLat.toFixed(5)}, lng=${hitLng.toFixed(5)}, dist=${distKm} km, terrain=${elev}m, ray=${points[globalIdx].rayAlt.toFixed(1)}m`);
 
-      // 7. Enrich with OSM peak name and Wikipedia description
-      const peak = await getPeakNearby(hitLat, hitLng);
-      const wiki = peak ? await getWikiSummary(peak.name) : null;
+        // 7. Enrich with OSM peak name and Wikipedia description
+        const peak = await getPeakNearby(hitLat, hitLng);
+        const wiki = peak ? await getWikiSummary(peak.name) : null;
 
-      return {
-        hit: true,
-        lat: hitLat,
-        lng: hitLng,
-        elevation: elev,
-        distance_km: distKm,
-        peak,
-        wiki,
-      };
+        return {
+          hit: true,
+          lat: hitLat,
+          lng: hitLng,
+          elevation: elev,
+          distance_km: distKm,
+          peak,
+          wiki,
+        };
+      }
     }
   }
 

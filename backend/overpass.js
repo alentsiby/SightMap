@@ -7,42 +7,53 @@ const axios = require('axios');
  * Searches for nodes tagged natural=peak or natural=mountain
  * within the specified radius of the hit point.
  *
+ * Uses GET with query parameter (more reliable than POST across regions).
+ *
  * @param {number} lat - Latitude of ray-terrain intersection
  * @param {number} lng - Longitude of ray-terrain intersection
- * @param {number} radiusMetres - Search radius (default 600m)
+ * @param {number} radiusMetres - Search radius (default 600m, widens to 2000m on retry)
  * @returns {Promise<{name: string, elevation: number|null, osm_id: number}|null>}
  */
 async function getPeakNearby(lat, lng, radiusMetres = 600) {
-  const query = `
-    [out:json][timeout:10];
-    (
-      node["natural"="peak"](around:${radiusMetres},${lat},${lng});
-      node["natural"="mountain"](around:${radiusMetres},${lat},${lng});
-    );
-    out body;
-  `;
+  // Try with the default radius first, then widen if nothing found
+  const radii = [radiusMetres, 2000];
 
-  try {
-    const r = await axios.post(
-      'https://overpass-api.de/api/interpreter',
-      query,
-      { headers: { 'Content-Type': 'text/plain' }, timeout: 8000 }
-    );
+  for (const radius of radii) {
+    const query = `[out:json][timeout:10];(node["natural"="peak"](around:${radius},${lat},${lng});node["natural"="mountain"](around:${radius},${lat},${lng}););out body;`;
 
-    const elements = r.data.elements;
-    if (!elements.length) return null;
+    try {
+      const r = await axios.get(
+        `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`,
+        {
+          headers: { 'User-Agent': 'SightLine/1.0' },
+          timeout: 10000,
+        }
+      );
 
-    // Return the closest peak (Overpass returns sorted by distance)
-    const closest = elements[0];
-    return {
-      name: closest.tags.name || closest.tags['name:en'] || 'Unknown peak',
-      elevation: closest.tags.ele ? parseInt(closest.tags.ele) : null,
-      osm_id: closest.id,
-    };
-  } catch (err) {
-    console.error('[overpass] Peak lookup failed:', err.message);
-    return null;
+      const elements = r.data.elements;
+      if (!elements.length) {
+        if (radius < 2000) {
+          console.log(`[overpass] No peaks within ${radius}m, widening to 2000m...`);
+          continue;
+        }
+        return null;
+      }
+
+      // Return the closest peak
+      const closest = elements[0];
+      console.log(`[overpass] Found peak: "${closest.tags?.name || 'Unnamed'}" (OSM ${closest.id}) within ${radius}m`);
+      return {
+        name: closest.tags?.name || closest.tags?.['name:en'] || 'Unknown peak',
+        elevation: closest.tags?.ele ? parseInt(closest.tags.ele) : null,
+        osm_id: closest.id,
+      };
+    } catch (err) {
+      console.error(`[overpass] Peak lookup failed (radius=${radius}m):`, err.message);
+      return null;
+    }
   }
+
+  return null;
 }
 
 module.exports = { getPeakNearby };
